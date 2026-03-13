@@ -10,10 +10,10 @@ guild is an AI-powered terminal assistant designed to answer questions, interact
 
 ## Setup & installation
 
-### Requirements
+#### Requirements
  
 - [Go](https://go.dev/dl/) 1.21+
-- An LLM provider (see below) — Ollama for free local usage, or a cloud API key
+- An LLM provider (see below), Ollama for free local usage, or a cloud API key
 
 ### 1. Set environment variables
 

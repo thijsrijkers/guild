@@ -14,40 +14,15 @@ guild is an AI-powered terminal assistant designed to answer questions, interact
 
 The app reads configuration from environment variables to decide which LLM provider to use.
 
-**Ollama (local, free):**
+**Variable setup:**
 ```bash
-export LLM_PROVIDER=ollama
-export LLM_MODEL=mistral
-```
+export LLM_PROVIDER=ollama | claude | gemini| openai
+export LLM_MODEL= 
 
-**Claude Haiku (recommended — cheap cloud model):**
-```bash
-export LLM_PROVIDER=claude
-export LLM_MODEL=claude-haiku-4-5-20251001
-export ANTHROPIC_API_KEY=your_key_here
-```
-Get your API key at [console.anthropic.com](https://console.anthropic.com).
-
-**Claude Sonnet (more capable, higher cost):**
-```bash
-export LLM_PROVIDER=claude
-export LLM_MODEL=claude-sonnet-4-6
-export ANTHROPIC_API_KEY=your_key_here
-```
-
-**Gemini (free tier, EU region may have restrictions):**
-```bash
-export LLM_PROVIDER=gemini
-export LLM_MODEL=gemini-2.0-flash
-export GEMINI_API_KEY=your_key_here
-```
-Get your API key at [aistudio.google.com](https://aistudio.google.com).
-
-**OpenAI:**
-```bash
-export LLM_PROVIDER=openai
-export LLM_MODEL=gpt-4o
-export OPENAI_API_KEY=your_key_here
+#If you dont use an local modal
+export ANTHROPIC_API_KEY=
+export GEMINI_API_KEY=
+export OPENAI_API_KEY=
 ```
 
 ### 2. Run the app
@@ -95,6 +70,6 @@ Use `Ctrl+L` to clear the conversation history when starting a new unrelated tas
 
 ## Model Strategy
 
-guild is model-agnostic. The backend supports multiple AI providers through a flexible architecture — switching models requires only a change in environment variables. 
+guild is model-agnostic. The backend supports multiple AI providers through a flexible architecture, switching models requires only a change in environment variables. 
 
 For local/free usage, Ollama with `mistral` is recommended. For cloud usage, **Claude Haiku** offers the best balance of quality and cost. Larger models like Claude Sonnet or GPT-4o are available when higher reasoning quality is needed.

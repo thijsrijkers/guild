@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"codeline/llm"
-	"codeline/tui"
+	"oda/llm"
+	"oda/tui"
 )
 
 func main() {

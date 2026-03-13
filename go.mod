@@ -1,4 +1,4 @@
-module codeline
+module oda
 
 go 1.24.0
 

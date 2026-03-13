@@ -1,13 +1,13 @@
 ```
-  ██████╗  ██████╗ ██████╗ ███████╗██╗     ██╗███╗   ██╗███████╗
- ██╔════╝ ██╔═══██╗██╔══██╗██╔════╝██║     ██║████╗  ██║██╔════╝
- ██║      ██║   ██║██║  ██║█████╗  ██║     ██║██╔██╗ ██║█████╗
- ██║      ██║   ██║██║  ██║██╔══╝  ██║     ██║██║╚██╗██║██╔══╝
- ╚██████╗ ╚██████╔╝██████╔╝███████╗███████╗██║██║ ╚████║███████╗
-  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝╚══════╝
+  ██████╗ ██████╗  █████╗
+ ██╔═══██╗██╔══██╗██╔══██╗
+ ██║   ██║██║  ██║███████║
+ ██║   ██║██║  ██║██╔══██║
+ ╚██████╔╝██████╔╝██║  ██║
+  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝
 ```
 
-Codeline is an AI-powered terminal assistant designed to answer questions, interact through a terminal UI, and make code adjustments.
+Oda is an AI-powered terminal assistant designed to answer questions, interact through a terminal UI, and make code adjustments.
 
 ## Setup & installation
 
@@ -47,7 +47,7 @@ Once the project successfully launched, you can execute:
 ```
 go install
 ````
-This will install the app. Now you should be able to interact with the project by typing <b>codeline</b> in your terminal
+This will install the app. Now you should be able to interact with the project by typing <b>oda</b> in your terminal
 
 ## Project Plan
 
@@ -62,4 +62,4 @@ The final phase focuses on adding AI-driven code editing capabilities. This will
 
 ## Model Strategy
 
-Codeline is designed to be model-agnostic. The backend will support multiple AI models through a flexible architecture so models can be swapped without major changes. For early testing and development, free and open-source models (such as LLaMA 3, GPT-NeoX, or StarCoder) will be used. This allows rapid iteration without cost while keeping future expansion open to more advanced or specialized models. This flexibility ensures the project is not limited to a single provider or technology.
+Oda is designed to be model-agnostic. The backend will support multiple AI models through a flexible architecture so models can be swapped without major changes. For early testing and development, free and open-source models (such as LLaMA 3, GPT-NeoX, or StarCoder) will be used. This allows rapid iteration without cost while keeping future expansion open to more advanced or specialized models. This flexibility ensures the project is not limited to a single provider or technology.

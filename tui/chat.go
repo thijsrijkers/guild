@@ -27,6 +27,28 @@ var (
 	_         = fgMuted
 )
 
+// ── conversation history ───────────────────────────────────────────────────
+
+// turn represents a single exchange in the conversation history.
+type turn struct {
+	role    string // "user" or "assistant"
+	content string
+}
+
+// historyToPrompt builds a full prompt string from system prompt + history.
+func historyToPrompt(systemPrompt string, history []turn) string {
+	var sb strings.Builder
+	sb.WriteString(systemPrompt)
+	sb.WriteString("\n\n")
+	for _, t := range history {
+		sb.WriteString(t.role)
+		sb.WriteString(": ")
+		sb.WriteString(t.content)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
+}
+
 // ── action parsing ──────────────────────────────────────────────────────────
 
 var actionRegex = regexp.MustCompile(`(?s)<action>(.*?)</action>`)
@@ -111,13 +133,14 @@ func agentAsk(
 	ctx context.Context,
 	client llm.LLM,
 	systemPrompt string,
-	userInput string,
+	history []turn,
 	statusBar *tview.TextView,
 	app *tview.Application,
 ) (string, error) {
-	conversation := systemPrompt + "\n\nUser: " + userInput
+	// Build prompt from full history so the model has context of past turns
+	conversation := historyToPrompt(systemPrompt, history)
 
-	for range 5 {
+	for range 10 {
 		response, err := client.Ask(ctx, conversation)
 		if err != nil {
 			return "", err
@@ -128,18 +151,20 @@ func agentAsk(
 			return stripActions(response), nil
 		}
 
+		text := stripActions(response)
+
 		switch a.Type {
 		case "read_file":
 			app.QueueUpdateDraw(func() {
 				statusBar.SetText(fmt.Sprintf("  [#ffcb6b]reading %s...[-]", a.Path))
 			})
-			content, err := prompt.ReadFile(a.Path)
+			fileContent, err := prompt.ReadFile(a.Path)
 			if err != nil {
-				conversation += fmt.Sprintf("\n\nCould not read %s: %v", a.Path, err)
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: Could not read %s: %v. Try a different path.\n\n", text, a.Path, err)
 			} else {
 				conversation += fmt.Sprintf(
-					"\n\nContents of %s:\n```\n%s\n```\nNow answer the user's question.",
-					a.Path, content,
+					"assistant: %s\n\nsystem: Contents of %s:\n```\n%s\n```\nNow apply the change using write_file.\n\n",
+					text, a.Path, fileContent,
 				)
 			}
 
@@ -148,25 +173,35 @@ func agentAsk(
 				statusBar.SetText(fmt.Sprintf("  [#ffcb6b]writing %s...[-]", a.Path))
 			})
 			if err := writeFile(a.Path, a.Content); err != nil {
-				return stripActions(response), fmt.Errorf("write failed: %w", err)
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: write_file failed: %v\n\n", text, err)
+			} else {
+				return text + fmt.Sprintf("\n\n✅ Written to %s", a.Path), nil
 			}
-			return stripActions(response) + fmt.Sprintf("\n\n✅ Written to %s", a.Path), nil
 
 		case "replace_in_file":
 			app.QueueUpdateDraw(func() {
 				statusBar.SetText(fmt.Sprintf("  [#ffcb6b]updating %s...[-]", a.Path))
 			})
-			if err := replaceInFile(a.Path, a.Old, a.New); err != nil {
-				return stripActions(response), fmt.Errorf("replace failed: %w", err)
+			existing, err := prompt.ReadFile(a.Path)
+			if err != nil {
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: Could not read %s: %v\n\n", text, a.Path, err)
+			} else if !strings.Contains(existing, a.Old) {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: replace_in_file failed — exact \"old\" string not found in %s. Use write_file with the full corrected content instead.\n\nCurrent file:\n```\n%s\n```\n\n",
+					text, a.Path, existing,
+				)
+			} else if err := replaceInFile(a.Path, a.Old, a.New); err != nil {
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: replace_in_file failed: %v\n\n", text, err)
+			} else {
+				return text + fmt.Sprintf("\n\n✅ Updated %s", a.Path), nil
 			}
-			return stripActions(response) + fmt.Sprintf("\n\n✅ Updated %s", a.Path), nil
 
 		default:
 			return stripActions(response), nil
 		}
 	}
 
-	return "", fmt.Errorf("agent exceeded maximum file read iterations")
+	return "", fmt.Errorf("could not complete the change after multiple attempts")
 }
 
 // ── file helpers ─────────────────────────────────────────────────────────────
@@ -236,7 +271,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		app.SetFocus(inputField)
 	})
 
-	// ── messages ──
+	// ── state ──
 	messages := []string{
 		`[#3bb88a]
   ██████╗ ██████╗  █████╗
@@ -249,10 +284,11 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	}
 	updateChat(chatView, messages)
 
+	// history holds all user/assistant turns for context
+	var history []turn
 	var mu sync.Mutex
 
 	// ── layout ──
-	// Use ResizeItem to show/hide sidebar — avoids Clear() rebuilding issues
 	inputFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
 		AddItem(nil, 1, 0, false).
@@ -262,7 +298,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
-		AddItem(sidebar, 0, 0, false). // width=0 = hidden by default
+		AddItem(sidebar, 0, 0, false).
 		AddItem(chatView, 0, 1, false)
 
 	root := tview.NewFlex().
@@ -286,13 +322,17 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 		inputField.SetText("")
 		mu.Lock()
+		// Add user turn to history
+		history = append(history, turn{role: "user", content: input})
+		historySnapshot := make([]turn, len(history))
+		copy(historySnapshot, history)
 		messages = append(messages, formatMessage("user", input))
 		updateChat(chatView, messages)
 		statusBar.SetText("  [#9aa0a6]thinking...[-]")
 		mu.Unlock()
 
-		go func(userInput string) {
-			response, err := agentAsk(ctx, client, systemPrompt, userInput, statusBar, app)
+		go func(snapshot []turn) {
+			response, err := agentAsk(ctx, client, systemPrompt, snapshot, statusBar, app)
 
 			app.QueueUpdateDraw(func() {
 				mu.Lock()
@@ -301,12 +341,14 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 					messages = append(messages, formatMessage("error", err.Error()))
 					statusBar.SetText("  [#f07178]" + err.Error() + "[-]")
 				} else {
+					// Add assistant turn to history so next message has full context
+					history = append(history, turn{role: "assistant", content: response})
 					messages = append(messages, formatMessage("assistant", response))
 					statusBar.SetText(statusDefault)
 				}
 				updateChat(chatView, messages)
 			})
-		}(input)
+		}(historySnapshot)
 	})
 
 	// ── global key bindings ──
@@ -320,6 +362,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		case tcell.KeyCtrlL:
 			mu.Lock()
 			messages = []string{}
+			history = []turn{} // also clear history so model forgets too
 			updateChat(chatView, messages)
 			mu.Unlock()
 			return nil

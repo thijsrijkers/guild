@@ -1,11 +1,15 @@
 package tui
 
-import "os"
+import (
+    "os"
+    "strings"
+)
 
 func readFileOS(path string) ([]byte, error) {
-	return os.ReadFile(path)
+    return os.ReadFile(path)
 }
 
 func writeFileOS(path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
+    normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+    return os.WriteFile(path, []byte(normalized), 0644)
 }

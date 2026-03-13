@@ -10,6 +10,11 @@ guild is an AI-powered terminal assistant designed to answer questions, interact
 
 ## Setup & installation
 
+### Requirements
+ 
+- [Go](https://go.dev/dl/) 1.21+
+- An LLM provider (see below) — Ollama for free local usage, or a cloud API key
+
 ### 1. Set environment variables
 
 The app reads configuration from environment variables to decide which LLM provider to use.
@@ -73,3 +78,14 @@ Use `Ctrl+L` to clear the conversation history when starting a new unrelated tas
 guild is model-agnostic. The backend supports multiple AI providers through a flexible architecture, switching models requires only a change in environment variables. 
 
 For local/free usage, Ollama with `mistral` is recommended. For cloud usage, **Claude Haiku** offers the best balance of quality and cost. Larger models like Claude Sonnet or GPT-4o are available when higher reasoning quality is needed.
+ 
+## Model comparison
+ 
+| Model | Cost | Quality | Best for |
+|---|---|---|---|
+| Ollama mistral | Free | Good | Local dev, no internet |
+| Claude Haiku | ~$0.08 / 1M tokens | Great | Everyday use |
+| Claude Sonnet | ~$3 / 1M tokens | Excellent | Complex tasks |
+| GPT-4o | ~$5 / 1M tokens | Excellent | Complex tasks |
+| Gemini Flash | Free tier | Good | EU users (check availability) |
+

@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"log"
 	"oda/llm"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"oda/prompt"
 	"regexp"
 	"strings"
@@ -52,6 +56,8 @@ func historyToPrompt(systemPrompt string, history []turn) string {
 // ── action parsing ──────────────────────────────────────────────────────────
 
 var actionRegex = regexp.MustCompile(`(?s)<action>(.*?)</action>`)
+var actionRegexUnclosed = regexp.MustCompile(`(?s)<action>(.*?)$`)
+var codeBlockRegex = regexp.MustCompile("(?s)```(?:[a-zA-Z]*)\n(.*?)```")
 
 type action struct {
 	Type    string `json:"type"`
@@ -62,15 +68,81 @@ type action struct {
 }
 
 func parseAction(response string) *action {
-	matches := actionRegex.FindStringSubmatch(response)
+	// Strip markdown code fences in case the model wrapped the action in them
+	cleaned := strings.ReplaceAll(response, "`", "")
+
+	// Try closed tag first, then fall back to unclosed (model cut off mid-response)
+	matches := actionRegex.FindStringSubmatch(cleaned)
+	if matches == nil {
+		matches = actionRegexUnclosed.FindStringSubmatch(cleaned)
+	}
 	if matches == nil {
 		return nil
 	}
+	jsonStr := strings.TrimSpace(matches[1])
+
+	// Try to close incomplete JSON by appending missing braces
+	jsonStr = repairJSON(jsonStr)
+
 	var a action
-	if err := json.Unmarshal([]byte(strings.TrimSpace(matches[1])), &a); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &a); err != nil {
+		return nil
+	}
+	if a.Type == "" {
 		return nil
 	}
 	return &a
+}
+
+// repairJSON attempts to close incomplete JSON by counting unclosed braces.
+func repairJSON(s string) string {
+	open := strings.Count(s, "{")
+	close := strings.Count(s, "}")
+	for i := 0; i < open-close; i++ {
+		s += "}"
+	}
+	return s
+}
+
+// codeCopyPath returns a cross-platform temp file path for copied code.
+func codeCopyPath() string {
+	return filepath.Join(os.TempDir(), "oda_copy.txt")
+}
+
+// copyToClipboard tries to copy text to the system clipboard.
+// Falls back to writing a temp file if no clipboard tool is available.
+func copyToClipboard(text string) string {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("clip")
+	default:
+		// Linux / WSL — try xclip, xsel, then wl-copy, then clip.exe (WSL)
+		if _, err := exec.LookPath("clip.exe"); err == nil {
+			cmd = exec.Command("clip.exe")
+		} else if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--input")
+		} else if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd = exec.Command("wl-copy")
+		}
+	}
+
+	if cmd != nil {
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err == nil {
+			return "  [#3bb88a]copied to clipboard![-]"
+		}
+	}
+
+	// Fallback: write to temp file
+	path := codeCopyPath()
+	_ = os.WriteFile(path, []byte(text), 0644)
+	return fmt.Sprintf("  [#ffcb6b]clipboard unavailable — saved to %s[-]", path)
 }
 
 func stripActions(response string) string {
@@ -78,6 +150,29 @@ func stripActions(response string) string {
 }
 
 // ── message formatting ──────────────────────────────────────────────────────
+
+// renderCodeBlocks replaces ```lang\n...``` with a styled code bubble and
+// returns the last code block found (for Ctrl+Y copying).
+func renderCodeBlocks(text string) (string, string) {
+	lastCode := ""
+	result := codeBlockRegex.ReplaceAllStringFunc(text, func(match string) string {
+		groups := codeBlockRegex.FindStringSubmatch(match)
+		if len(groups) < 2 {
+			return match
+		}
+		code := strings.TrimSpace(groups[1])
+		lastCode = code
+		lines := strings.Split(code, "\n")
+		var sb strings.Builder
+		sb.WriteString("\n[#3bb88a]  ╔═ code ══════════════════════════════════[-]\n")
+		for _, line := range lines {
+			sb.WriteString(fmt.Sprintf("[#3bb88a]  ║[-] [#ffffff]%s[-]\n", line))
+		}
+		sb.WriteString("[#3bb88a]  ╚═ ctrl+y to copy ═══════════════════════[-]\n")
+		return sb.String()
+	})
+	return result, lastCode
+}
 
 func formatMessage(role, text string) string {
 	var roleTag string
@@ -95,6 +190,14 @@ func formatMessage(role, text string) string {
 	body := "  " + strings.ReplaceAll(text, "\n", "\n  ") + "\n"
 	divider := "[#1e2025]────────────────────────────────────────[-]\n"
 	return header + body + divider
+}
+
+func formatAssistantMessage(text string) (string, string) {
+	rendered, lastCode := renderCodeBlocks(text)
+	header := "[#3bb88a]> oda[-]\n"
+	body := "  " + strings.ReplaceAll(rendered, "\n", "\n  ") + "\n"
+	divider := "[#1e2025]────────────────────────────────────────[-]\n"
+	return header + body + divider, lastCode
 }
 
 func updateChat(view *tview.TextView, messages []string) {
@@ -132,13 +235,15 @@ func buildSidebar(entries []prompt.FileEntry, onSelect func(string)) *tview.List
 func agentAsk(
 	ctx context.Context,
 	client llm.LLM,
-	systemPrompt string,
+	systemPrompt *string,
 	history []turn,
 	statusBar *tview.TextView,
 	app *tview.Application,
+	onFileWritten func(),
 ) (string, error) {
 	// Build prompt from full history so the model has context of past turns
-	conversation := historyToPrompt(systemPrompt, history)
+	conversation := historyToPrompt(*systemPrompt, history)
+	var completedActions []string
 
 	for range 10 {
 		response, err := client.Ask(ctx, conversation)
@@ -148,7 +253,12 @@ func agentAsk(
 
 		a := parseAction(response)
 		if a == nil {
-			return stripActions(response), nil
+			// No more actions — build final response with action summaries prepended
+			finalText := stripActions(response)
+			if len(completedActions) > 0 {
+				finalText = strings.Join(completedActions, "\n") + "\n\n" + finalText
+			}
+			return strings.TrimSpace(finalText), nil
 		}
 
 		text := stripActions(response)
@@ -173,9 +283,12 @@ func agentAsk(
 				statusBar.SetText(fmt.Sprintf("  [#ffcb6b]writing %s...[-]", a.Path))
 			})
 			if err := writeFile(a.Path, a.Content); err != nil {
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: write_file failed: %v\n\n", text, err)
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: write_file failed: %v. Try again.\n\n", text, err)
 			} else {
-				return text + fmt.Sprintf("\n\n✅ Written to %s", a.Path), nil
+				// Success — feed result back and keep looping so model can do follow-up actions
+				completedActions = append(completedActions, fmt.Sprintf("written to %s", a.Path))
+				onFileWritten()
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
 			}
 
 		case "replace_in_file":
@@ -193,7 +306,10 @@ func agentAsk(
 			} else if err := replaceInFile(a.Path, a.Old, a.New); err != nil {
 				conversation += fmt.Sprintf("assistant: %s\n\nsystem: replace_in_file failed: %v\n\n", text, err)
 			} else {
-				return text + fmt.Sprintf("\n\n✅ Updated %s", a.Path), nil
+				// Success — keep looping for follow-up actions
+				completedActions = append(completedActions, fmt.Sprintf("updated %s", a.Path))
+				onFileWritten()
+				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
 			}
 
 		default:
@@ -219,7 +335,7 @@ func replaceInFile(path, old, new string) error {
 	return writeFileOS(path, []byte(updated))
 }
 
-const statusDefault = "  [#9aa0a6]ctrl+c[-] quit   [#9aa0a6]ctrl+l[-] clear   [#9aa0a6]ctrl+b[-] files   [#9aa0a6]enter[-] send"
+const statusDefault = "  [#9aa0a6]ctrl+c[-] quit   [#9aa0a6]ctrl+l[-] clear   [#9aa0a6]ctrl+b[-] files   [#9aa0a6]ctrl+y[-] copy code   [#9aa0a6]enter[-] send"
 const statusSidebar = "  [#9aa0a6]ctrl+b[-] hide files   [#9aa0a6]ctrl+f[-] focus   [#9aa0a6]esc[-] back to input"
 
 // ── main entry ────────────────────────────────────────────────────────────────
@@ -232,7 +348,8 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	if err != nil {
 		log.Fatalf("could not scan project: %v", err)
 	}
-	systemPrompt := prompt.Build(entries)
+	systemPromptStr := prompt.Build(entries)
+	systemPrompt := &systemPromptStr
 
 	app := tview.NewApplication()
 
@@ -287,6 +404,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	// history holds all user/assistant turns for context
 	var history []turn
 	var mu sync.Mutex
+	var lastCodeBlock string
 
 	// ── layout ──
 	inputFlex := tview.NewFlex().
@@ -332,7 +450,31 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		mu.Unlock()
 
 		go func(snapshot []turn) {
-			response, err := agentAsk(ctx, client, systemPrompt, snapshot, statusBar, app)
+			// refreshProject rebuilds the file tree and updates the system prompt + sidebar
+			refreshProject := func() {
+				newEntries, err := prompt.BuildFileList(".")
+				if err != nil {
+					return
+				}
+				newPrompt := prompt.Build(newEntries)
+				*systemPrompt = newPrompt
+				app.QueueUpdateDraw(func() {
+					sidebar.Clear()
+					for _, e := range newEntries {
+						path := e.RelPath
+						sidebar.AddItem(path, "", 0, func() {
+							current := inputField.GetText()
+							if current == "" {
+								inputField.SetText("explain " + path)
+							} else {
+								inputField.SetText(current + " " + path)
+							}
+							app.SetFocus(inputField)
+						})
+					}
+				})
+			}
+			response, err := agentAsk(ctx, client, systemPrompt, snapshot, statusBar, app, refreshProject)
 
 			app.QueueUpdateDraw(func() {
 				mu.Lock()
@@ -343,7 +485,11 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				} else {
 					// Add assistant turn to history so next message has full context
 					history = append(history, turn{role: "assistant", content: response})
-					messages = append(messages, formatMessage("assistant", response))
+					formatted, codeBlock := formatAssistantMessage(response)
+					if codeBlock != "" {
+						lastCodeBlock = codeBlock
+					}
+					messages = append(messages, formatted)
 					statusBar.SetText(statusDefault)
 				}
 				updateChat(chatView, messages)
@@ -386,6 +532,14 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				statusBar.SetText(statusSidebar)
 			}
 			app.SetFocus(sidebar)
+			return nil
+
+		case tcell.KeyCtrlY:
+			if lastCodeBlock == "" {
+				statusBar.SetText("  [#9aa0a6]no code block to copy[-]")
+			} else {
+				statusBar.SetText(copyToClipboard(lastCodeBlock))
+			}
 			return nil
 
 		case tcell.KeyEscape:

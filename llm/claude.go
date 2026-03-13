@@ -28,7 +28,7 @@ func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 
 	msg, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.model),
-		MaxTokens: 1024,
+		MaxTokens: 4096,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 		},

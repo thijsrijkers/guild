@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"guild/llm"
+	"guild/prompt"
 	"log"
-	"oda/llm"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"oda/prompt"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -106,7 +106,7 @@ func repairJSON(s string) string {
 
 // codeCopyPath returns a cross-platform temp file path for copied code.
 func codeCopyPath() string {
-	return filepath.Join(os.TempDir(), "oda_copy.txt")
+	return filepath.Join(os.TempDir(), "guild_copy.txt")
 }
 
 // copyToClipboard tries to copy text to the system clipboard.
@@ -180,7 +180,7 @@ func formatMessage(role, text string) string {
 	case "user":
 		roleTag = "[#c792ea]> you[-]"
 	case "assistant":
-		roleTag = "[#3bb88a]> oda[-]"
+		roleTag = "[#3bb88a]> guild[-]"
 	case "error":
 		roleTag = "[#f07178]> error[-]"
 	default:
@@ -194,7 +194,7 @@ func formatMessage(role, text string) string {
 
 func formatAssistantMessage(text string) (string, string) {
 	rendered, lastCode := renderCodeBlocks(text)
-	header := "[#3bb88a]> oda[-]\n"
+	header := "[#3bb88a]> guild[-]\n"
 	body := "  " + strings.ReplaceAll(rendered, "\n", "\n  ") + "\n"
 	divider := "[#1e2025]────────────────────────────────────────[-]\n"
 	return header + body + divider, lastCode
@@ -391,12 +391,12 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	// ── state ──
 	messages := []string{
 		`[#3bb88a]
-  ██████╗ ██████╗  █████╗
- ██╔═══██╗██╔══██╗██╔══██╗
- ██║   ██║██║  ██║███████║
- ██║   ██║██║  ██║██╔══██║
- ╚██████╔╝██████╔╝██║  ██║
-  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝`,
+  ██████╗ ██╗   ██╗██╗██╗     ██████╗
+ ██╔════╝ ██║   ██║██║██║     ██╔══██╗
+ ██║  ███╗██║   ██║██║██║     ██║  ██║
+ ██║   ██║██║   ██║██║██║     ██║  ██║
+ ╚██████╔╝╚██████╔╝██║███████╗██████╔╝
+  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝`,
 		fmt.Sprintf("[#9aa0a6] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", len(entries)),
 	}
 	updateChat(chatView, messages)

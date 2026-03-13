@@ -1,4 +1,4 @@
-module oda
+module guild
 
 go 1.24.0
 

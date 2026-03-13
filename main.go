@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"oda/llm"
-	"oda/tui"
+	"guild/llm"
+	"guild/tui"
 )
 
 func main() {

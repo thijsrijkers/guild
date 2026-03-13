@@ -16,11 +16,16 @@ func NewFromEnv() (LLM, error) {
 	switch provider {
 	case "ollama":
 		if model == "" {
-			model = "llama2"
+			model = "deepseek-coder"
 		}
 		return NewOllamaClient(model), nil
-
+	case "gemini":
+    return NewGeminiClient(model)
+	case "claude":
+    return NewClaudeClient(model)
+	case "openai":
+    return NewOpenAIClient(model)
 	default:
-		return NewOllamaClient("llama2"), nil
+		return NewOllamaClient("deepseek-coder"), nil
 	}
 }
